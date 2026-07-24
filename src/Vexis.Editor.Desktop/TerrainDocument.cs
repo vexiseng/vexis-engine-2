@@ -187,6 +187,24 @@ public sealed class TerrainDocument
 
     public float[] CopyHeights() => (float[])_heights.Clone();
 
+    public void ResetToHeight(float height)
+    {
+        Array.Fill(_heights, height);
+        Revision++;
+    }
+
+    public void Smoothen(int radius = 1)
+    {
+        var source = CopyHeights();
+        for (var y = 0; y < Height; y++)
+        for (var x = 0; x < Width; x++)
+        {
+            var average = NeighborhoodAverage(source, x, y, radius);
+            this[x, y] = average;
+        }
+        Revision++;
+    }
+
     public static TerrainDocument From(int width, int height, float[] heights)
     {
         var terrain = new TerrainDocument(width, height);

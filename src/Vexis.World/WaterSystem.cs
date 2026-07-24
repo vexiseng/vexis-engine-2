@@ -25,6 +25,8 @@ public sealed class SolvedWaterBody
 {
     public required WaterBodyDefinition Definition { get; init; }
     public required IReadOnlyDictionary<WorldCell, WaterCell> Cells { get; init; }
+    public float EstimatedVolume => Cells.Values.Sum(cell => MathF.Max(0f, cell.Depth));
+    public float AverageDepth => Cells.Count == 0 ? 0f : Cells.Values.Average(cell => cell.Depth);
 }
 
 /// <summary>

@@ -4,6 +4,7 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Vexis.World;
 
 namespace Vexis.Editor.Desktop;
 
@@ -26,6 +27,7 @@ public sealed class MainWindow : Window
     public MainWindow()
     {
         _terrain = new TerrainViewport(_state);
+        _worldMap.Bind(_state);
         Title = "Vexis Studio 2 — Vaelor";
         Width = 1500;
         Height = 900;
@@ -80,7 +82,7 @@ public sealed class MainWindow : Window
                     MenuAction("Live 3D World Preview", Open3DPreview),
                     MenuAction("Place Tree", () => _state.AddWorldObject("Oak Tree", "Scenery", 28, 30)),
                     MenuAction("Place NPC Spawn", () => _state.AddWorldObject("NPC Spawn", "Gameplay", 34, 32)),
-                    MenuAction("Water Body", () => Log("Semantic water-body tool selected."))
+                    MenuAction("Water Body", () => CreateWaterPreviewFromSelection())
                 }},
                 new MenuItem { Header = "_Content", ItemsSource = new object[]
                 {
@@ -214,13 +216,34 @@ public sealed class MainWindow : Window
         return panel;
     }
 
-    private static Control BuildAssetBrowser()
+    private Control BuildAssetBrowser()
     {
         var panel = new StackPanel { Margin = new Thickness(10), Spacing = 6 };
         panel.Children.Add(new TextBox { PlaceholderText = "Search assets…" });
+        panel.Children.Add(ActionButton("Import Sample Asset", () =>
+        {
+            var assetPath = Path.Combine(AppContext.BaseDirectory, "sample.asset");
+            File.WriteAllText(assetPath, "placeholder asset");
+            _state.ImportAsset(assetPath, "Sample Asset", AssetKind.Model);
+        }));
+        panel.Children.Add(ActionButton("Refresh Asset Health", () => _state.ValidateProject()));
         foreach (var folder in new[] { "Models", "Materials", "Textures", "Animations", "Audio", "UI", "Worlds", "Data" })
             panel.Children.Add(new Button { Content = $"▸  {folder}/", HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Left });
-        panel.Children.Add(new TextBlock { Text = "Blender assets will enter through glTF/GLB import and automatic reimport.", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 10, 0, 0), Foreground = Brushes.LightGray });
+        panel.Children.Add(new TextBlock { Text = "Imported assets are tracked locally and validated against the current project state.", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 10, 0, 0), Foreground = Brushes.LightGray });
+        var list = new ItemsControl();
+        list.ItemsSource = _state.Assets.Select(asset =>
+            $"{asset.Kind}: {asset.Name} ({asset.Path}){(asset.IsNew ? " [new]" : " [reimported]")}{(asset.LastReimportedAtUtc is not null ? $" @ {asset.LastReimportedAtUtc:yyyy-MM-dd HH:mm}" : string.Empty)}");
+        panel.Children.Add(list);
+        panel.Children.Add(new Separator());
+        panel.Children.Add(ActionButton("Reimport Selected Asset", () =>
+        {
+            var asset = _state.Assets.LastOrDefault();
+            if (asset is not null)
+            {
+                _state.ReimportAsset(asset);
+                Refresh();
+            }
+        }));
         return panel;
     }
 
@@ -242,8 +265,8 @@ public sealed class MainWindow : Window
             {
                 new TabItem { Header = "Console", Foreground = Brushes.White, Content = _console },
                 new TabItem { Header = "AI Assistant", Foreground = Brushes.White, Content = BuildAiPanel() },
-                new TabItem { Header = "Validation", Foreground = Brushes.White, Content = new TextBlock { Text = "Project validation will report broken references, missing assets, unreachable quests, bad spawns, and build blockers.", Margin = new Thickness(12), TextWrapping = TextWrapping.Wrap } },
-                new TabItem { Header = "Build Tasks", Foreground = Brushes.White, Content = new TextBlock { Text = "Asset imports, terrain baking, navmesh generation, map tiles, and runtime packaging will appear here.", Margin = new Thickness(12), TextWrapping = TextWrapping.Wrap } }
+                new TabItem { Header = "Validation", Foreground = Brushes.White, Content = BuildValidationPanel() },
+                new TabItem { Header = "Build Tasks", Foreground = Brushes.White, Content = BuildBuildTasksPanel() }
             }
         };
         return PanelBorder(tabs);
@@ -325,9 +348,21 @@ public sealed class MainWindow : Window
         _inspector.Children.Add(new Separator());
         _inspector.Children.Add(ActionButton("Place Oak Tree", () => _state.AddWorldObject("Oak Tree", "Scenery", 30, 30)));
         _inspector.Children.Add(ActionButton("Place NPC Spawn", () => _state.AddWorldObject("NPC Spawn", "Gameplay", 34, 32)));
-        _inspector.Children.Add(ActionButton("Create Water Body", () => Log("Water solve preview queued for selected basin.")));
+        _inspector.Children.Add(ActionButton("Create Water Body", CreateWaterPreviewFromSelection));
+        _inspector.Children.Add(ActionButton("Validate Project", () => _state.ValidateProject()));
         _inspector.Children.Add(new Separator());
+        if (_state.WaterBodies.Count > 0)
+        {
+            _inspector.Children.Add(new TextBlock { Text = "Water Bodies", FontWeight = FontWeight.SemiBold });
+            foreach (var body in _state.WaterBodies)
+            {
+                _inspector.Children.Add(new TextBlock { Text = $"• {body.Name} ({body.Seeds.Count} seed(s), elevation {body.SurfaceElevation:0.00})", TextWrapping = TextWrapping.Wrap, Foreground = Brushes.LightGray });
+            }
+            _inspector.Children.Add(new Separator());
+        }
         _inspector.Children.Add(ActionButton("Generate Rolling Terrain", () => { _state.Terrain.GenerateRollingTerrain(Environment.TickCount); _state.MarkDirty(); _terrain.InvalidateVisual(); Log("Generated a new rolling terrain seed."); }));
+        _inspector.Children.Add(ActionButton("Smooth Terrain", () => { _state.Terrain.Smoothen(); _state.MarkDirty(); _terrain.InvalidateVisual(); Log("Smoothed the terrain surface."); }));
+        _inspector.Children.Add(ActionButton("Reset Terrain", () => { _state.Terrain.ResetToHeight(0f); _state.MarkDirty(); _terrain.InvalidateVisual(); Log("Reset the terrain to a flat zero-height state."); }));
         _inspector.Children.Add(ActionButton("Flatten Entire Terrain", () => { _state.Terrain.FlattenAll(); _state.MarkDirty(); _terrain.InvalidateVisual(); Log("Flattened the terrain heightfield."); }));
     }
 
@@ -359,6 +394,15 @@ public sealed class MainWindow : Window
         _inspector.Children.Add(LabeledTextBox("Recommended Level", content.Level.ToString(), value => { if (int.TryParse(value, out var level)) content.Level = Math.Max(1, level); }));
         _inspector.Children.Add(new Separator());
         _inspector.Children.Add(new TextBlock { Text = "References and validation will appear here so every quest, NPC, item, spawn, dialogue, and asset remains connected.", TextWrapping = TextWrapping.Wrap, Foreground = Brushes.LightGray });
+        if (_state.ContentReferences.Count > 0)
+        {
+            _inspector.Children.Add(new Separator());
+            _inspector.Children.Add(new TextBlock { Text = "Content References", FontWeight = FontWeight.SemiBold });
+            foreach (var reference in _state.ContentReferences.Take(8))
+            {
+                _inspector.Children.Add(new TextBlock { Text = $"• {reference.SourceId} -> {reference.TargetId} [{reference.Kind}]", TextWrapping = TextWrapping.Wrap, Foreground = Brushes.LightGray });
+            }
+        }
     }
 
     private Control LabeledTextBox(string label, string value, Action<string> commit, bool multiline = false)
@@ -415,6 +459,34 @@ public sealed class MainWindow : Window
         return root;
     }
 
+    private Control BuildValidationPanel()
+    {
+        var panel = new StackPanel { Margin = new Thickness(12), Spacing = 8 };
+        panel.Children.Add(new TextBlock { Text = "Project validation", FontSize = 18, FontWeight = FontWeight.SemiBold });
+        panel.Children.Add(new TextBlock { Text = "Checks terrain bounds, duplicate content IDs, and object placement against the active world size.", TextWrapping = TextWrapping.Wrap, Foreground = Brushes.LightGray });
+        panel.Children.Add(ActionButton("Run Validation", () => _state.ValidateProject()));
+        panel.Children.Add(ActionButton("Build & Launch", () =>
+        {
+            _state.ValidateProject();
+            _state.BuildRuntimeBundle();
+        }));
+        var issues = new ItemsControl { Margin = new Thickness(0, 8, 0, 0) };
+        issues.ItemsSource = _state.ValidationIssues.Select(issue => $"[{issue.Code}] {issue.Message}");
+        panel.Children.Add(issues);
+        return new ScrollViewer { Content = panel };
+    }
+
+    private Control BuildBuildTasksPanel()
+    {
+        var panel = new StackPanel { Margin = new Thickness(12), Spacing = 8 };
+        panel.Children.Add(new TextBlock { Text = "Build Tasks", FontSize = 18, FontWeight = FontWeight.SemiBold });
+        var list = new ItemsControl { Margin = new Thickness(0, 8, 0, 0) };
+        panel.Children.Add(new TextBlock { Text = $"Runtime: {_state.RuntimeLaunchState.Status} — {_state.RuntimeLaunchState.Message}", TextWrapping = TextWrapping.Wrap, Foreground = Brushes.LightGray });
+        list.ItemsSource = _state.BuildTasks.Select(task => $"{task.Name}: {task.Status}");
+        panel.Children.Add(list);
+        return new ScrollViewer { Content = panel };
+    }
+
     private Control BuildProjectDashboard()
     {
         var root = new StackPanel { Margin = new Thickness(24), Spacing = 14 };
@@ -426,7 +498,7 @@ public sealed class MainWindow : Window
         grid.Children.Add(DashboardCard("WORLD MAP", "Generated map layers, labels, icons and travel links", () => SwitchWorkspace("World Map")));
         grid.Children.Add(DashboardCard("ASSET PIPELINE", "GLB import, reimport, materials, collision and thumbnails", () => Log("Asset pipeline workspace is queued next.")));
         grid.Children.Add(DashboardCard("VALIDATION", "Cross-reference checks and build blockers", () => Log("Validation scan requested.")));
-        grid.Children.Add(DashboardCard("PLAY & DEBUG", RuntimeStatus(), Play));
+        grid.Children.Add(DashboardCard("PLAY & DEBUG", $"{RuntimeStatus()}\n{_state.RuntimeLaunchState.Status}: {_state.RuntimeLaunchState.Message}", Play));
         root.Children.Add(grid);
         return new ScrollViewer { Content = root };
     }
@@ -481,6 +553,11 @@ public sealed class MainWindow : Window
         _state.MarkDirty();
     }
 
+    private void CreateWaterPreviewFromSelection()
+    {
+        var seed = _state.Selected?.Position ?? new System.Numerics.Vector3(32, 0, 32);
+        _state.BuildWaterPreview(Math.Max(0f, seed.Y + 2f), (int)Math.Round(seed.X), (int)Math.Round(seed.Z));
+    }
 
     private void Open3DPreview()
     {

@@ -61,6 +61,14 @@ public sealed class WorldMapProjection(WorldMapBounds bounds, int baseWidth, int
         return ((int)Math.Floor(scaledX / tileSize), (int)Math.Floor(scaledY / tileSize));
     }
 
+    public (double WorldX, double WorldZ) TileToWorld(int tileX, int tileY, int zoom, int tileSize = 256)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(zoom);
+        double pixelX = (tileX * tileSize) / (double)(1 << zoom);
+        double pixelY = (tileY * tileSize) / (double)(1 << zoom);
+        return PixelToWorld(pixelX, pixelY);
+    }
+
     private void ValidateBounds()
     {
         if (bounds.Width <= 0 || bounds.Height <= 0 || baseWidth <= 0 || baseHeight <= 0)

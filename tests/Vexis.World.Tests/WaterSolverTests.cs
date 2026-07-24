@@ -46,4 +46,22 @@ public sealed class WaterSolverTests
 
         Assert.DoesNotContain(new WorldCell(3, 1), result.Cells.Keys);
     }
+
+    [Fact]
+    public void SolvedWaterBodyReportsPositiveVolumeAndDepthMetrics()
+    {
+        var terrain = new GlobalElevationField { DefaultElevation = 0f };
+        var solver = new WaterBodySolver(terrain);
+        var definition = new WaterBodyDefinition(
+            Guid.NewGuid(),
+            "Volume Lake",
+            4f,
+            [new WorldCell(1, 1)],
+            new WaterSolveBounds(0, 0, 3, 3));
+
+        SolvedWaterBody result = solver.Solve(definition);
+
+        Assert.True(result.EstimatedVolume > 0f);
+        Assert.True(result.AverageDepth > 0f);
+    }
 }

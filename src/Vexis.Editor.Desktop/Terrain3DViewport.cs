@@ -97,6 +97,8 @@ public sealed class Terrain3DViewport : Control
         foreach (var cell in cells.OrderByDescending(c => c.Depth))
             DrawCell(context, cell);
 
+        DrawWater(context, projection);
+
         if (_state.BrushPreview.IsVisible)
             DrawBrushPreview(context, projection);
 
@@ -224,6 +226,41 @@ public sealed class Terrain3DViewport : Control
         var fill = new SolidColorBrush(cell.Color);
         Pen? pen = ShowWireframe ? new Pen(new SolidColorBrush(Color.FromArgb(52, 255, 255, 255)), .45) : null;
         context.DrawGeometry(fill, pen, geometry);
+    }
+
+    private void DrawWater(DrawingContext context, Projection projection)
+    {
+        if (_state.WaterBodies.Count == 0)
+            return;
+
+        foreach (var waterBody in _state.WaterBodies)
+        {
+            var preview = _state.WaterPreview;
+            var source = preview?.Cells;
+            if (source is null || source.Count == 0)
+                continue;
+
+            foreach (var cell in source.Values)
+            {
+                var point = projection.Project(cell.Coordinate.X, cell.SurfaceElevation * HeightScale, cell.Coordinate.Z);
+                if (!point.Visible)
+                    continue;
+
+                var fill = new SolidColorBrush(Color.FromArgb(130, 70, 130, 220));
+                var pen = new Pen(new SolidColorBrush(Color.FromArgb(200, 95, 160, 240)), 1.0);
+                var quad = new StreamGeometry();
+                using (var stream = quad.Open())
+                {
+                    stream.BeginFigure(point.Screen, true);
+                    stream.LineTo(new Point(point.Screen.X + 5, point.Screen.Y + 2));
+                    stream.LineTo(new Point(point.Screen.X + 2, point.Screen.Y + 7));
+                    stream.LineTo(new Point(point.Screen.X - 3, point.Screen.Y + 4));
+                    stream.EndFigure(true);
+                }
+
+                context.DrawGeometry(fill, pen, quad);
+            }
+        }
     }
 
     private void DrawBrushPreview(DrawingContext context, Projection projection)
