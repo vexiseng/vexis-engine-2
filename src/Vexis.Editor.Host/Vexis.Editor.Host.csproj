@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Vexis.Commands/Vexis.Commands.csproj" />
+    <ProjectReference Include="../Vexis.AI/Vexis.AI.csproj" />
+    <ProjectReference Include="../Vexis.AI.Ollama/Vexis.AI.Ollama.csproj" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,1 @@
+<Project Sdk="Microsoft.NET.Sdk"><ItemGroup><ProjectReference Include="../Vexis.Modeling/Vexis.Modeling.csproj" /><ProjectReference Include="../Vexis.World/Vexis.World.csproj" /></ItemGroup></Project>

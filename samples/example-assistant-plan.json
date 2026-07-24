@@ -1,0 +1,18 @@
+{
+  "explanation": "Place the registered watchtower asset at the active cursor. The command remains reversible.",
+  "toolCalls": [
+    {
+      "name": "world.place_asset",
+      "arguments": {
+        "asset": "vaelor:structures/ruined_watchtower",
+        "x": 128,
+        "y": 0,
+        "z": 256
+      }
+    }
+  ],
+  "assumptions": [
+    "The selected location is the active world cursor.",
+    "The ruined watchtower asset already exists in the registry."
+  ]
+}

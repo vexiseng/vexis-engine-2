@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../Vexis.Foundation/Vexis.Foundation.csproj" />
+  </ItemGroup>
+</Project>
