@@ -11,6 +11,7 @@ public sealed class EditorState
     public ObservableCollection<string> Log { get; } = [];
     public ObservableCollection<ContentDefinition> Content { get; } = [];
     public RuntimeSession Runtime { get; } = new();
+    public TerrainBrushPreview BrushPreview { get; } = new();
     public TerrainDocument Terrain { get; private set; } = new(64, 64);
     public SceneObject? Selected { get; set; }
     public ContentDefinition? SelectedContent { get; set; }
