@@ -1,9 +1,11 @@
 bin/
 obj/
 .vs/
-.idea/
+.vscode/
 *.user
 *.suo
-artifacts/
-.vexis/cache/
-.vexis/models/
+*.cache
+*.log
+*.tmp
+*.bak
+TestResults/
