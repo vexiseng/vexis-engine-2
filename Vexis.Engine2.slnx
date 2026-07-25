@@ -1,4 +1,4 @@
-<Solution>
+﻿<Solution>
   <Folder Name="/src/">
     <Project Path="src/Vexis.Foundation/Vexis.Foundation.csproj" />
     <Project Path="src/Vexis.Commands/Vexis.Commands.csproj" />
@@ -9,11 +9,13 @@
     <Project Path="src/Vexis.Runtime/Vexis.Runtime.csproj" />
     <Project Path="src/Vexis.Editor.Host/Vexis.Editor.Host.csproj" />
     <Project Path="src/Vexis.Editor.Desktop/Vexis.Editor.Desktop.csproj" />
+    <Project Path="src/Vexis.Rendering/Vexis.Rendering.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Vexis.Commands.Tests/Vexis.Commands.Tests.csproj" />
     <Project Path="tests/Vexis.AI.Tests/Vexis.AI.Tests.csproj" />
     <Project Path="tests/Vexis.World.Tests/Vexis.World.Tests.csproj" />
     <Project Path="tests/Vexis.Modeling.Tests/Vexis.Modeling.Tests.csproj" />
+    <Project Path="tests/Vexis.Rendering.Tests/Vexis.Rendering.Tests.csproj" />
   </Folder>
 </Solution>

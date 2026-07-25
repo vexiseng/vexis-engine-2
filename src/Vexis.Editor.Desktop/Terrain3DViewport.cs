@@ -4,6 +4,7 @@ using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Threading;
 using System.Numerics;
+using Vexis.World;
 
 namespace Vexis.Editor.Desktop;
 
