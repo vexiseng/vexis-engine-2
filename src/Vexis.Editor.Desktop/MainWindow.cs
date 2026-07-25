@@ -69,8 +69,8 @@ public sealed class MainWindow : Window
                 }},
                 new MenuItem { Header = "_Edit", ItemsSource = new object[]
                 {
-                    MenuAction("Undo", () => Log("Undo command requested.")),
-                    MenuAction("Redo", () => Log("Redo command requested.")),
+                    MenuAction("Undo", _state.Undo),
+                    MenuAction("Redo", _state.Redo),
                     MenuAction("Duplicate Selected", _state.DuplicateSelected),
                     new Separator(),
                     MenuAction("Preferences", () => Log("Preferences workspace selected."))
@@ -348,7 +348,13 @@ public sealed class MainWindow : Window
         _inspector.Children.Add(new Separator());
         _inspector.Children.Add(ActionButton("Place Oak Tree", () => _state.AddWorldObject("Oak Tree", "Scenery", 30, 30)));
         _inspector.Children.Add(ActionButton("Place NPC Spawn", () => _state.AddWorldObject("NPC Spawn", "Gameplay", 34, 32)));
-        _inspector.Children.Add(ActionButton("Create Water Body", CreateWaterPreviewFromSelection));
+        _inspector.Children.Add(ActionButton("Preview Water Body", CreateWaterPreviewFromSelection));
+        if (_state.WaterPreview is not null)
+        {
+            _inspector.Children.Add(new TextBlock { Text = $"Preview: {_state.WaterPreview.Cells.Count} cells, average depth {_state.WaterPreview.AverageDepth:0.00}", TextWrapping = TextWrapping.Wrap, Foreground = Brushes.LightBlue });
+            _inspector.Children.Add(ActionButton("Confirm Water Body", () => _state.CommitWaterPreview()));
+            _inspector.Children.Add(ActionButton("Cancel Water Preview", _state.CancelWaterPreview));
+        }
         _inspector.Children.Add(ActionButton("Validate Project", () => _state.ValidateProject()));
         _inspector.Children.Add(new Separator());
         if (_state.WaterBodies.Count > 0)
@@ -360,10 +366,10 @@ public sealed class MainWindow : Window
             }
             _inspector.Children.Add(new Separator());
         }
-        _inspector.Children.Add(ActionButton("Generate Rolling Terrain", () => { _state.Terrain.GenerateRollingTerrain(Environment.TickCount); _state.MarkDirty(); _terrain.InvalidateVisual(); Log("Generated a new rolling terrain seed."); }));
-        _inspector.Children.Add(ActionButton("Smooth Terrain", () => { _state.Terrain.Smoothen(); _state.MarkDirty(); _terrain.InvalidateVisual(); Log("Smoothed the terrain surface."); }));
-        _inspector.Children.Add(ActionButton("Reset Terrain", () => { _state.Terrain.ResetToHeight(0f); _state.MarkDirty(); _terrain.InvalidateVisual(); Log("Reset the terrain to a flat zero-height state."); }));
-        _inspector.Children.Add(ActionButton("Flatten Entire Terrain", () => { _state.Terrain.FlattenAll(); _state.MarkDirty(); _terrain.InvalidateVisual(); Log("Flattened the terrain heightfield."); }));
+        _inspector.Children.Add(ActionButton("Generate Rolling Terrain", () => ApplyTerrainOperation("Generate rolling terrain", () => _state.Terrain.GenerateRollingTerrain(Environment.TickCount))));
+        _inspector.Children.Add(ActionButton("Smooth Terrain", () => ApplyTerrainOperation("Smooth terrain", () => _state.Terrain.Smoothen())));
+        _inspector.Children.Add(ActionButton("Reset Terrain", () => ApplyTerrainOperation("Reset terrain", () => _state.Terrain.ResetToHeight(0f))));
+        _inspector.Children.Add(ActionButton("Flatten Entire Terrain", () => ApplyTerrainOperation("Flatten terrain", () => _state.Terrain.FlattenAll())));
     }
 
     private void BuildObjectInspector(SceneObject obj)
@@ -559,6 +565,15 @@ public sealed class MainWindow : Window
         _state.BuildWaterPreview(Math.Max(0f, seed.Y + 2f), (int)Math.Round(seed.X), (int)Math.Round(seed.Z));
     }
 
+    private void ApplyTerrainOperation(string description, Action operation)
+    {
+        var before = _state.Terrain.CopyHeights();
+        operation();
+        _state.RecordTerrainChange(description, before);
+        _terrain.InvalidateVisual();
+        Log(description + ".");
+    }
+
     private void Open3DPreview()
     {
         if (_world3DWindow is { IsVisible: true })
@@ -608,10 +623,13 @@ public sealed class MainWindow : Window
     private void OnKeyDown(object? sender, KeyEventArgs e)
     {
         if (e.KeyModifiers.HasFlag(KeyModifiers.Control) && e.Key == Key.S) { TrySave(); e.Handled = true; }
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Control) && e.Key == Key.Z) { _state.Undo(); e.Handled = true; }
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Control) && (e.Key == Key.Y || (e.KeyModifiers.HasFlag(KeyModifiers.Shift) && e.Key == Key.Z))) { _state.Redo(); e.Handled = true; }
         if (e.Key == Key.Delete && _state.Selected is not null) _state.DeleteSelected();
         if (e.KeyModifiers.HasFlag(KeyModifiers.Control) && e.Key == Key.D && _state.Selected is not null) _state.DuplicateSelected();
         if (e.Key == Key.F5) Play();
-        if (e.Key == Key.Escape && _state.Runtime.IsPlaying) Stop();
+        if (e.Key == Key.Escape && _state.WaterPreview is not null) { _state.CancelWaterPreview(); e.Handled = true; }
+        else if (e.Key == Key.Escape && _state.Runtime.IsPlaying) Stop();
     }
 
     private static Border PanelBorder(Control child) => new() { Background = new SolidColorBrush(Color.Parse("#2B323A")), BorderBrush = new SolidColorBrush(Color.Parse("#56616D")), BorderThickness = new Thickness(1), Child = child };

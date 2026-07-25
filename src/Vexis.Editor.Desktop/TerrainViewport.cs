@@ -67,7 +67,7 @@ public sealed class TerrainViewport : Control
         ClipToBounds = true;
         PointerPressed += OnPressed;
         PointerMoved += OnMoved;
-        PointerReleased += (_, _) => { _painting = false; _panning = false; };
+        PointerReleased += (_, _) => { if (_painting) _state.EndTerrainStroke(); _painting = false; _panning = false; };
         PointerWheelChanged += OnWheel;
         PointerExited += (_, _) => _state.BrushPreview.Hide();
         SyncBrushPreview();
@@ -203,6 +203,7 @@ public sealed class TerrainViewport : Control
         _panning = props.IsMiddleButtonPressed;
         _painting = props.IsLeftButtonPressed || props.IsRightButtonPressed;
         _lowering = props.IsRightButtonPressed;
+        if (_painting) _state.BeginTerrainStroke();
         SyncBrushPreview();
         if (_painting) ApplyBrush(_pointer);
     }

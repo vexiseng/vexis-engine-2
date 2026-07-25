@@ -230,36 +230,39 @@ public sealed class Terrain3DViewport : Control
 
     private void DrawWater(DrawingContext context, Projection projection)
     {
-        if (_state.WaterBodies.Count == 0)
-            return;
+        foreach (var solved in _state.SolvedWaterBodies.Values)
+            DrawSolvedWater(context, projection, solved, isPreview: false);
 
-        foreach (var waterBody in _state.WaterBodies)
+        if (_state.WaterPreview is not null)
+            DrawSolvedWater(context, projection, _state.WaterPreview, isPreview: true);
+    }
+
+    private void DrawSolvedWater(DrawingContext context, Projection projection, SolvedWaterBody solved, bool isPreview)
+    {
+        foreach (var cell in solved.Cells.Values)
         {
-            var preview = _state.WaterPreview;
-            var source = preview?.Cells;
-            if (source is null || source.Count == 0)
-                continue;
+            var a = projection.Project(cell.Coordinate.X, cell.SurfaceElevation, cell.Coordinate.Z);
+            var b = projection.Project(cell.Coordinate.X + 1, cell.SurfaceElevation, cell.Coordinate.Z);
+            var c = projection.Project(cell.Coordinate.X + 1, cell.SurfaceElevation, cell.Coordinate.Z + 1);
+            var d = projection.Project(cell.Coordinate.X, cell.SurfaceElevation, cell.Coordinate.Z + 1);
+            if (!a.Visible || !b.Visible || !c.Visible || !d.Visible) continue;
 
-            foreach (var cell in source.Values)
+            var geometry = new StreamGeometry();
+            using (var stream = geometry.Open())
             {
-                var point = projection.Project(cell.Coordinate.X, cell.SurfaceElevation * HeightScale, cell.Coordinate.Z);
-                if (!point.Visible)
-                    continue;
-
-                var fill = new SolidColorBrush(Color.FromArgb(130, 70, 130, 220));
-                var pen = new Pen(new SolidColorBrush(Color.FromArgb(200, 95, 160, 240)), 1.0);
-                var quad = new StreamGeometry();
-                using (var stream = quad.Open())
-                {
-                    stream.BeginFigure(point.Screen, true);
-                    stream.LineTo(new Point(point.Screen.X + 5, point.Screen.Y + 2));
-                    stream.LineTo(new Point(point.Screen.X + 2, point.Screen.Y + 7));
-                    stream.LineTo(new Point(point.Screen.X - 3, point.Screen.Y + 4));
-                    stream.EndFigure(true);
-                }
-
-                context.DrawGeometry(fill, pen, quad);
+                stream.BeginFigure(a.Screen, true);
+                stream.LineTo(b.Screen);
+                stream.LineTo(c.Screen);
+                stream.LineTo(d.Screen);
+                stream.EndFigure(true);
             }
+
+            var alpha = isPreview ? (byte)105 : (byte)155;
+            var edgeAlpha = isPreview ? (byte)230 : (byte)175;
+            context.DrawGeometry(
+                new SolidColorBrush(Color.FromArgb(alpha, 58, 132, 205)),
+                new Pen(new SolidColorBrush(Color.FromArgb(edgeAlpha, 112, 190, 245)), isPreview ? 1.4 : .65),
+                geometry);
         }
     }
 

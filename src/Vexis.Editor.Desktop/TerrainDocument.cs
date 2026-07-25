@@ -187,6 +187,17 @@ public sealed class TerrainDocument
 
     public float[] CopyHeights() => (float[])_heights.Clone();
 
+    public void RestoreHeights(float[] heights)
+    {
+        ArgumentNullException.ThrowIfNull(heights);
+        if (heights.Length != _heights.Length)
+            throw new ArgumentException("Terrain snapshot dimensions do not match this terrain.", nameof(heights));
+
+        Array.Copy(heights, _heights, heights.Length);
+        ClampHeights(-40f, 120f);
+        Revision++;
+    }
+
     public void ResetToHeight(float height)
     {
         Array.Fill(_heights, height);

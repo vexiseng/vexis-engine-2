@@ -12,11 +12,15 @@ public sealed class EditorState
     public ObservableCollection<string> Log { get; } = [];
     public ObservableCollection<ContentDefinition> Content { get; } = [];
     public RuntimeSession Runtime { get; } = new();
+    public EditorHistory History { get; } = new();
     public TerrainBrushPreview BrushPreview { get; } = new();
     public TerrainDocument Terrain { get; private set; } = new(64, 64);
     public WaterBodyDefinition? ActiveWaterBody { get; private set; }
     public SolvedWaterBody? WaterPreview { get; private set; }
     public List<WaterBodyDefinition> WaterBodies { get; } = [];
+    public IReadOnlyDictionary<Guid, SolvedWaterBody> SolvedWaterBodies => _solvedWaterBodies;
+    private readonly Dictionary<Guid, SolvedWaterBody> _solvedWaterBodies = [];
+    private float[]? _terrainStrokeBefore;
     public List<AssetRecord> Assets { get; } = [];
     public IReadOnlyList<ContentReference> ContentReferences { get; private set; } = [];
     public IReadOnlyList<ValidationIssue> ValidationIssues { get; private set; } = [];
@@ -70,31 +74,135 @@ public sealed class EditorState
 
     public void BuildWaterPreview(float surfaceElevation, int seedX, int seedZ)
     {
-        var solver = new WaterBodySolver(new GlobalElevationField
-        {
-            DefaultElevation = 0f
-        });
-        var terrain = Terrain;
-        var field = new GlobalElevationField { DefaultElevation = terrain.CopyHeights().DefaultIfEmpty(0f).Average() };
-        var heights = terrain.CopyHeights();
-        for (int y = 0; y < terrain.Height; y++)
-        for (int x = 0; x < terrain.Width; x++)
-        {
-            field.Set(new WorldVertex(x, y), heights[y * terrain.Width + x]);
-        }
+        if (seedX < 0 || seedZ < 0 || seedX >= Terrain.Width - 1 || seedZ >= Terrain.Height - 1)
+            throw new ArgumentOutOfRangeException(nameof(seedX), "The water seed must be inside the terrain.");
 
         var definition = new WaterBodyDefinition(
             Guid.NewGuid(),
-            $"Preview Lake {seedX},{seedZ}",
+            $"Lake {WaterBodies.Count + 1}",
             surfaceElevation,
             [new WorldCell(seedX, seedZ)],
-            new WaterSolveBounds(Math.Max(0, seedX - 8), Math.Max(0, seedZ - 8), Math.Min(terrain.Width - 1, seedX + 8), Math.Min(terrain.Height - 1, seedZ + 8)));
+            new WaterSolveBounds(0, 0, Terrain.Width - 2, Terrain.Height - 2));
 
         ActiveWaterBody = definition;
-        WaterPreview = new WaterBodySolver(field).Solve(definition);
-        WaterBodies.Add(definition);
-        Log.Add($"Computed water-body preview for {definition.Name} using elevation {surfaceElevation:0.00}.");
+        WaterPreview = SolveWater(definition);
+        Log.Add(WaterPreview.Cells.Count == 0
+            ? "Water preview is empty. Raise its elevation or choose a lower seed."
+            : $"Previewing {WaterPreview.Cells.Count} water cell(s) at elevation {surfaceElevation:0.00}. Confirm or cancel the preview.");
         Notify();
+    }
+
+    public bool CommitWaterPreview()
+    {
+        if (ActiveWaterBody is null || WaterPreview is null || WaterPreview.Cells.Count == 0)
+            return false;
+
+        var definition = ActiveWaterBody;
+        var solved = WaterPreview;
+        WaterBodies.Add(definition);
+        _solvedWaterBodies[definition.Id] = solved;
+        ClearWaterPreview();
+
+        History.Record(new DelegateEditorOperation(
+            $"Create {definition.Name}",
+            () => { WaterBodies.RemoveAll(w => w.Id == definition.Id); _solvedWaterBodies.Remove(definition.Id); MarkDirty(); },
+            () => { WaterBodies.Add(definition); _solvedWaterBodies[definition.Id] = solved; MarkDirty(); }));
+
+        Log.Add($"Created {definition.Name} with {solved.Cells.Count} cell(s).");
+        MarkDirty();
+        return true;
+    }
+
+    public void CancelWaterPreview()
+    {
+        if (ActiveWaterBody is null && WaterPreview is null) return;
+        ClearWaterPreview();
+        Log.Add("Cancelled water preview.");
+        Notify();
+    }
+
+    public void DeleteWaterBody(Guid id)
+    {
+        var definition = WaterBodies.FirstOrDefault(w => w.Id == id);
+        if (definition is null) return;
+        _solvedWaterBodies.TryGetValue(id, out var solved);
+        var index = WaterBodies.IndexOf(definition);
+        WaterBodies.RemoveAt(index);
+        _solvedWaterBodies.Remove(id);
+        History.Record(new DelegateEditorOperation(
+            $"Delete {definition.Name}",
+            () => { WaterBodies.Insert(Math.Min(index, WaterBodies.Count), definition); if (solved is not null) _solvedWaterBodies[id] = solved; MarkDirty(); },
+            () => { WaterBodies.RemoveAll(w => w.Id == id); _solvedWaterBodies.Remove(id); MarkDirty(); }));
+        MarkDirty();
+    }
+
+    private SolvedWaterBody SolveWater(WaterBodyDefinition definition)
+    {
+        var field = new GlobalElevationField { DefaultElevation = Terrain.CopyHeights().DefaultIfEmpty(0f).Average() };
+        var heights = Terrain.CopyHeights();
+        for (var z = 0; z < Terrain.Height; z++)
+        for (var x = 0; x < Terrain.Width; x++)
+            field.Set(new WorldVertex(x, z), heights[z * Terrain.Width + x]);
+        return new WaterBodySolver(field).Solve(definition);
+    }
+
+    private void ClearWaterPreview()
+    {
+        ActiveWaterBody = null;
+        WaterPreview = null;
+    }
+
+    public void BeginTerrainStroke()
+    {
+        _terrainStrokeBefore ??= Terrain.CopyHeights();
+    }
+
+    public void EndTerrainStroke(string description = "Sculpt terrain")
+    {
+        if (_terrainStrokeBefore is null) return;
+        var before = _terrainStrokeBefore;
+        _terrainStrokeBefore = null;
+        var after = Terrain.CopyHeights();
+        if (before.SequenceEqual(after)) return;
+        History.Record(new DelegateEditorOperation(
+            description,
+            () => { Terrain.RestoreHeights(before); RebuildSolvedWaterBodies(); MarkDirty(); },
+            () => { Terrain.RestoreHeights(after); RebuildSolvedWaterBodies(); MarkDirty(); }));
+    }
+
+    public void RecordTerrainChange(string description, float[] before)
+    {
+        var after = Terrain.CopyHeights();
+        if (before.SequenceEqual(after)) return;
+        History.Record(new DelegateEditorOperation(
+            description,
+            () => { Terrain.RestoreHeights(before); RebuildSolvedWaterBodies(); MarkDirty(); },
+            () => { Terrain.RestoreHeights(after); RebuildSolvedWaterBodies(); MarkDirty(); }));
+        MarkDirty();
+    }
+
+    public void Undo()
+    {
+        var description = History.UndoDescription;
+        if (!History.Undo()) return;
+        Log.Add($"Undid: {description}");
+        Notify();
+    }
+
+    public void Redo()
+    {
+        var description = History.RedoDescription;
+        if (!History.Redo()) return;
+        Log.Add($"Redid: {description}");
+        Notify();
+    }
+
+    private void RebuildSolvedWaterBodies()
+    {
+        _solvedWaterBodies.Clear();
+        foreach (var body in WaterBodies)
+            _solvedWaterBodies[body.Id] = SolveWater(body);
+        if (ActiveWaterBody is not null) WaterPreview = SolveWater(ActiveWaterBody);
     }
 
     public void ValidateProject()
@@ -200,8 +308,10 @@ public sealed class EditorState
 
     public void Save(string path)
     {
+        var projectDirectory = Path.GetDirectoryName(Path.GetFullPath(path)) ?? Environment.CurrentDirectory;
         var data = new ProjectFile
         {
+            FormatVersion = ProjectFile.CurrentFormatVersion,
             ProjectName = ProjectName,
             TerrainWidth = Terrain.Width,
             TerrainHeight = Terrain.Height,
@@ -209,7 +319,7 @@ public sealed class EditorState
             Objects = Objects.Select(o => new SceneObjectFile(o.Name, o.Category, o.Position.X, o.Position.Y, o.Position.Z, o.Rotation.X, o.Rotation.Y, o.Rotation.Z, o.Scale.X, o.Scale.Y, o.Scale.Z)).ToList(),
             Content = Content.Select(c => new ContentDefinitionFile(c.Type, c.Id, c.Name, c.Description, c.Level)).ToList(),
             WaterBodies = WaterBodies.Select(w => new WaterBodyFile(w.Id, w.Name, w.SurfaceElevation, w.Seeds.Select(c => new WorldCellFile(c.X, c.Z)).ToList(), new WaterSolveBoundsFile(w.Bounds.MinX, w.Bounds.MinZ, w.Bounds.MaxX, w.Bounds.MaxZ), w.MinimumDepth)).ToList(),
-            Assets = Assets.Select(a => new AssetFile(a.Id, a.Name, a.Path, a.Kind, a.IsNew)).ToList()
+            Assets = Assets.Select(a => new AssetFile(a.Id, a.Name, MakeProjectRelativePath(projectDirectory, a.Path), a.Kind, a.IsNew)).ToList()
         };
         File.WriteAllText(path, JsonSerializer.Serialize(data, new JsonSerializerOptions { WriteIndented = true }));
         IsDirty = false;
@@ -220,6 +330,9 @@ public sealed class EditorState
     public void Load(string path)
     {
         var data = JsonSerializer.Deserialize<ProjectFile>(File.ReadAllText(path)) ?? throw new InvalidDataException("Project file is empty.");
+        if (data.FormatVersion > ProjectFile.CurrentFormatVersion)
+            throw new InvalidDataException($"Project format {data.FormatVersion} is newer than this editor supports ({ProjectFile.CurrentFormatVersion}).");
+        var projectDirectory = Path.GetDirectoryName(Path.GetFullPath(path)) ?? Environment.CurrentDirectory;
         ProjectName = data.ProjectName;
         var heights = data.TerrainHeights.Length > 0 ? data.TerrainHeights : Array.Empty<float>();
         Terrain = TerrainDocument.From(data.TerrainWidth, data.TerrainHeight, heights);
@@ -237,7 +350,9 @@ public sealed class EditorState
         Content.Clear();
         foreach (var item in data.Content)
             Content.Add(new ContentDefinition(item.Type, item.Id, item.Name) { Description = item.Description, Level = item.Level });
+        ClearWaterPreview();
         WaterBodies.Clear();
+        _solvedWaterBodies.Clear();
         foreach (var body in data.WaterBodies ?? [])
         {
             WaterBodies.Add(new WaterBodyDefinition(
@@ -250,13 +365,28 @@ public sealed class EditorState
         }
         Assets.Clear();
         foreach (var asset in data.Assets ?? [])
-            Assets.Add(new AssetRecord(asset.Id, asset.Name, asset.Path, asset.Kind, asset.IsNew));
+            Assets.Add(new AssetRecord(asset.Id, asset.Name, ResolveProjectPath(projectDirectory, asset.Path), asset.Kind, asset.IsNew));
+        RebuildSolvedWaterBodies();
+        History.Clear();
         Selected = Objects.FirstOrDefault();
         SelectedContent = Content.FirstOrDefault();
         ValidateProject();
         IsDirty = false;
         Log.Add($"Loaded project from {Path.GetFullPath(path)}");
         Changed?.Invoke();
+    }
+
+    private static string MakeProjectRelativePath(string projectDirectory, string path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return string.Empty;
+        var full = Path.GetFullPath(path);
+        return Path.GetRelativePath(projectDirectory, full).Replace('\\', '/');
+    }
+
+    private static string ResolveProjectPath(string projectDirectory, string path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return string.Empty;
+        return Path.IsPathRooted(path) ? Path.GetFullPath(path) : Path.GetFullPath(Path.Combine(projectDirectory, path));
     }
 }
 
@@ -284,6 +414,8 @@ public sealed class ContentDefinition(string type, string id, string name)
 
 public sealed class ProjectFile
 {
+    public const int CurrentFormatVersion = 2;
+    public int FormatVersion { get; set; } = CurrentFormatVersion;
     public string ProjectName { get; set; } = "Vaelor";
     public int TerrainWidth { get; set; } = 64;
     public int TerrainHeight { get; set; } = 64;
